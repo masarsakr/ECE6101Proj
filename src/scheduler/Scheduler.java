@@ -99,8 +99,10 @@ public class Scheduler {
 
           //get the tasks
           int taskIdStart = 0;
+        
           int numTasks = JobFactory.getJob(fileName, className).getNumTasks();
 
+         for (int i = 0; i< numTasks;i++){
           //get a free worker
           WorkerNode n = cluster.getFreeWorkerNode();
           
@@ -116,14 +118,15 @@ public class Scheduler {
           wos.writeInt(Opcode.new_tasks);
           wos.writeInt(jobId);
           wos.writeUTF(className);
-          wos.writeInt(taskIdStart);
-          wos.writeInt(numTasks);
+          wos.writeInt(taskIdStart+i);
+          wos.writeInt(1);
           wos.flush();
           //wos.close();
           
           tasksWorker.add(n);
           tasksWorkerStream.add(wis);
           tasksJobStream.add(dos);
+          }
 
         } //go through all wis and try to readInt
 
