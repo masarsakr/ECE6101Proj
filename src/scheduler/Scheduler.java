@@ -32,10 +32,10 @@ public class Scheduler {
     ArrayList<DataOutputStream> jobStreamQueue = new ArrayList<DataOutputStream>(); //output stream to job in queue
 
     //Data for running tasks
-    ArrayList<Integer> tasksJob = new ArrayList<Integer>();             //Job ID
-    ArrayList<WorkerNode> tasksWorker = new ArrayList<WorkerNode>();    //Worker for task
-    ArrayList<DataInputStream> tasksWorkerStream = new ArrayList<DataInputStream>(); //Stream between worker and scheduler
-    ArrayList<DataOutputStream> tasksJobStream = new ArrayList<DataOutputStream>(); //Stream between job and scheduler
+    ArrayList<Integer> jobIDRunQueue = new ArrayList<Integer>();             //Job ID
+    ArrayList<WorkerNode> workerRunQueue = new ArrayList<WorkerNode>();    //Worker for task
+    ArrayList<DataInputStream> workerStreamRunQueue = new ArrayList<DataInputStream>(); //Stream between worker and scheduler
+    ArrayList<DataOutputStream> jobStreamRunQueue = new ArrayList<DataOutputStream>(); //Stream between job and scheduler
 
     //variable for indexing into different pools
     int nextJob = 0;
@@ -163,10 +163,10 @@ public class Scheduler {
             wos.flush();
                             
             //Save data so can get data from worker later
-            tasksJob.add(jobQueue);              //Job ID
-            tasksWorker.add(n);               //Worker
-            tasksWorkerStream.add(wis);       //Stream from worker to scheduler
-            tasksJobStream.add(streamQueue);          //Stream from scheduler to job
+            jobIDRunQueue.add(jobQueue);              //Job ID
+            workerRunQueue.add(n);               //Worker
+            workerStreamRunQueue .add(wis);       //Stream from worker to scheduler
+            jobStreamRunQueue.add(streamQueue);          //Stream from scheduler to job
             
             //Handle Scheduling
             int foundNextFlag = 0;
@@ -189,12 +189,12 @@ public class Scheduler {
         
         //////////////////////////Handle Finished Job//////////////////////////////////////////
         //See if any jobs are finished
-        for (int i =0; i<tasksWorker.size(); i++){
+        for (int i =0; i<jobIDRunQueue.size(); i++){
             //Pull data about ongoing job
-            int jobID = tasksJob.get(i);
-            WorkerNode worker = tasksWorker.get(i);
-            DataInputStream workerStream = tasksWorkerStream.get(i);
-            DataOutputStream jobStream = tasksJobStream.get(i);
+            int jobID = jobIDRunQueue.get(i);
+            WorkerNode worker = workerRunQueue.get(i);
+            DataInputStream workerStream = workerStreamRunQueue.get(i);
+            DataOutputStream jobStream = jobStreamRunQueue.get(i);
             
             //Choose who to schedule
             
@@ -208,18 +208,18 @@ public class Scheduler {
                 }
 
                 //Remove Job & worker since done
-                tasksJob.remove(i);
-                tasksWorker.remove(i);
+                jobIDRunQueue.remove(i);
+                workerRunQueue.remove(i);
                 //Remove connections
-                tasksWorkerStream.remove(i);
-                tasksJobStream.remove(i);
+                workerStreamRunQueue.remove(i);
+                jobStreamRunQueue.remove(i);
 
                 // free the worker and free the stream
                 workerStream.close();
                 cluster.addFreeWorkerNode(worker);
 
                 //notify the client if last task in job
-                if (tasksJob.contains(jobID)==false){
+                if (jobIDRunQueue.contains(jobID)==false && jobIDQueue.contains(jobID)==false){
                     jobStream.writeInt(Opcode.job_finish);
                     jobStream.close();
                 }
