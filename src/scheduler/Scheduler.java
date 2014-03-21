@@ -25,6 +25,7 @@ public class Scheduler {
   }
 
   public void run() {
+    ArrayList<Integer> tasksJob = new ArrayList<Integer>(); //all the workers
     ArrayList<WorkerNode> tasksWorker = new ArrayList<WorkerNode>(); //all the workers
     ArrayList<DataInputStream> tasksWorkerStream = new ArrayList<DataInputStream>(); //all the workers
     ArrayList<DataOutputStream> tasksJobStream = new ArrayList<DataOutputStream>(); //all the workers
@@ -40,7 +41,8 @@ public class Scheduler {
         DataInputStream dis = null;
         DataOutputStream dos = null;
 
-        try {            //accept connection from worker or client
+        //Check for connections
+        try {                                            //accept connection from worker or client
             socket = serverSocket.accept();
             dis = new DataInputStream(socket.getInputStream());
             dos = new DataOutputStream(socket.getOutputStream());
@@ -50,33 +52,41 @@ public class Scheduler {
             dos = null;
         }
 
-        int code = -1;          //Initialize code
+        //Initialize code
+        int code = -1;          
         //If there is a connection, read
         if (dis!=null){    
             code = dis.readInt();
         }
         
+        ///////////////////////////Recieve Worker/////////////////////////////////////////
+        
         //a connection from worker reporting itself
         if(code == Opcode.new_worker){
           //include the worker into the cluster
           WorkerNode n = cluster.createWorkerNode( dis.readUTF(), dis.readInt());
+          
           if( n == null){          //Creation unsuccessful
             dos.writeInt(Opcode.error);
-          }
-          else{          //Creation successful
+          }else{                 //Creation successful
             dos.writeInt(Opcode.success);
             dos.writeInt(n.id);
             System.out.println("Worker "+n.id+" "+n.addr+" "+n.port+" created");
           }
+                    
+          //close Streams
           dos.flush();
+          socket.close();
         }
+
+        //////////////////////////Recieve Job//////////////////////////////////////////
 
         //a connection from client submitting a job
         if(code == Opcode.new_job){
           String className = dis.readUTF();
           long len = dis.readLong();
 
-          //send out the jobId
+          //send out the jobId to requester
           int jobId = jobIdNext++;
           dos.writeInt(jobId);
           dos.flush();
@@ -96,70 +106,84 @@ public class Scheduler {
           fos.flush();
           fos.close();
           
-
           //get the tasks
           int taskIdStart = 0;
-        
           int numTasks = JobFactory.getJob(fileName, className).getNumTasks();
-
-         for (int i = 0; i< numTasks;i++){
-          //get a free worker
-          WorkerNode n = cluster.getFreeWorkerNode();
           
-          //notify the client
-          dos.writeInt(Opcode.job_start);
-          dos.flush();
+          //Individually find worker for each task of job
+          for (int i = 0; i< numTasks;i++){
+              //get a free worker
+              WorkerNode n = cluster.getFreeWorkerNode();
+              
+              //notify the client
+              dos.writeInt(Opcode.job_start);
+              dos.flush();
 
-          //assign the tasks to the worker
-          Socket workerSocket = new Socket(n.addr, n.port);
-          DataInputStream wis = new DataInputStream(workerSocket.getInputStream());
-          DataOutputStream wos = new DataOutputStream(workerSocket.getOutputStream());
-          
-          wos.writeInt(Opcode.new_tasks);
-          wos.writeInt(jobId);
-          wos.writeUTF(className);
-          wos.writeInt(taskIdStart+i);
-          wos.writeInt(1);
-          wos.flush();
-          //wos.close();
-          
-          tasksWorker.add(n);
-          tasksWorkerStream.add(wis);
-          tasksJobStream.add(dos);
-          }
+              //assign the tasks to the worker
+              Socket workerSocket = new Socket(n.addr, n.port);
+              DataInputStream wis = new DataInputStream(workerSocket.getInputStream());
+              DataOutputStream wos = new DataOutputStream(workerSocket.getOutputStream());
+              //Provide data
+              wos.writeInt(Opcode.new_tasks);
+              wos.writeInt(jobId);
+              wos.writeUTF(className);
+              wos.writeInt(taskIdStart+i);
+              wos.writeInt(1);
+              wos.flush();
+                            
+              //Save data so can get data from worker later
+              tasksJob.add(jobId);              //Job ID
+              tasksWorker.add(n);               //Worker
+              tasksWorkerStream.add(wis);       //Stream from worker to scheduler
+              tasksJobStream.add(dos);          //Stream from scheduler to job
+              
+            }
 
-        } //go through all wis and try to readInt
-
+        } 
+        
+        //////////////////////////Handle Queue//////////////////////////////////////////
+        
+        
+        //////////////////////////Handle Finished Job//////////////////////////////////////////
+        
+        //See if any jobs are finished
         for (int i =0; i<tasksWorker.size(); i++){
+            //Pull data about ongoing job
+            int jobID = tasksJob.get(i);
             WorkerNode worker = tasksWorker.get(i);
             DataInputStream workerStream = tasksWorkerStream.get(i);
             DataOutputStream jobStream = tasksJobStream.get(i);
-          //repeatedly process the worker's feedback
+            
+          //Check if worker on task has anything to return
             if (workerStream.available()>0){
-           while(workerStream.readInt() == Opcode.task_finish) {
-            jobStream.writeInt(Opcode.job_print);
-            jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+worker.id);
-            jobStream.flush();
-          }
+                //Get information about task
+               while(workerStream.readInt() == Opcode.task_finish) {
+                jobStream.writeInt(Opcode.job_print);
+                jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+worker.id);
+                jobStream.flush();
+              }
 
-          //disconnect and free the worker
-          //wis.close();
-          //workerSocket.close();
-          cluster.addFreeWorkerNode(worker);
+                //Remove Job & worker since done
+                tasksJob.remove(i);
+                tasksWorker.remove(i);
+                //Remove connections
+                tasksWorkerStream.remove(i);
+                tasksJobStream.remove(i);
 
-          //notify the client
-          jobStream.writeInt(Opcode.job_finish);
-          jobStream.flush();
+              // free the worker and free the stream
+              workerStream.close();
+              cluster.addFreeWorkerNode(worker);
+
+              //notify the client if last task in job
+              if (tasksJob.contains(jobID)==false){
+                jobStream.writeInt(Opcode.job_finish);
+                jobStream.close();
+              }
+              
+
           }
         }
-        
-        //If socket connection, close connections
-        if (socket!=null){
-            //dis.close();
-            //dos.close();
-            //socket.close();
-        }
-        }
+    }
     } catch(Exception e) {
       e.printStackTrace();
     }
