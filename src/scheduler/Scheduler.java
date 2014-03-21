@@ -25,10 +25,18 @@ public class Scheduler {
   }
 
   public void run() {
-    ArrayList<Integer> tasksJob = new ArrayList<Integer>(); //all the workers
-    ArrayList<WorkerNode> tasksWorker = new ArrayList<WorkerNode>(); //all the workers
-    ArrayList<DataInputStream> tasksWorkerStream = new ArrayList<DataInputStream>(); //all the workers
-    ArrayList<DataOutputStream> tasksJobStream = new ArrayList<DataOutputStream>(); //all the workers
+    //Data for queue
+    ArrayList<Integer> jobIDQueue = new ArrayList<Integer>();           //job in queue
+    ArrayList<Integer> taskIDQueue = new ArrayList<Integer>();          //task in queue
+    ArrayList<String> classNameQueue = new ArrayList<String>();             //class name in queue
+    ArrayList<DataOutputStream> jobStreamQueue = new ArrayList<DataOutputStream>(); //output stream to job in queue
+
+
+    //Data for running tasks
+    ArrayList<Integer> tasksJob = new ArrayList<Integer>();             //Job ID
+    ArrayList<WorkerNode> tasksWorker = new ArrayList<WorkerNode>();    //Worker for task
+    ArrayList<DataInputStream> tasksWorkerStream = new ArrayList<DataInputStream>(); //Stream between worker and scheduler
+    ArrayList<DataOutputStream> tasksJobStream = new ArrayList<DataOutputStream>(); //Stream between job and scheduler
 
     try{
       //create a ServerSocket listening at specified port - set timeout at 1000ms
@@ -65,7 +73,6 @@ public class Scheduler {
         if(code == Opcode.new_worker){
           //include the worker into the cluster
           WorkerNode n = cluster.createWorkerNode( dis.readUTF(), dis.readInt());
-          
           if( n == null){          //Creation unsuccessful
             dos.writeInt(Opcode.error);
           }else{                 //Creation successful
@@ -74,9 +81,8 @@ public class Scheduler {
             System.out.println("Worker "+n.id+" "+n.addr+" "+n.port+" created");
           }
                     
-          //close Streams
+          //flush Streams
           dos.flush();
-          socket.close();
         }
 
         //////////////////////////Recieve Job//////////////////////////////////////////
@@ -107,45 +113,64 @@ public class Scheduler {
           fos.close();
           
           //get the tasks
-          int taskIdStart = 0;
           int numTasks = JobFactory.getJob(fileName, className).getNumTasks();
           
-          //Individually find worker for each task of job
+          //Add tasks to queues
           for (int i = 0; i< numTasks;i++){
-              //get a free worker
-              WorkerNode n = cluster.getFreeWorkerNode();
-              
-              //notify the client
-              dos.writeInt(Opcode.job_start);
-              dos.flush();
-
-              //assign the tasks to the worker
-              Socket workerSocket = new Socket(n.addr, n.port);
-              DataInputStream wis = new DataInputStream(workerSocket.getInputStream());
-              DataOutputStream wos = new DataOutputStream(workerSocket.getOutputStream());
-              //Provide data
-              wos.writeInt(Opcode.new_tasks);
-              wos.writeInt(jobId);
-              wos.writeUTF(className);
-              wos.writeInt(taskIdStart+i);
-              wos.writeInt(1);
-              wos.flush();
-                            
-              //Save data so can get data from worker later
-              tasksJob.add(jobId);              //Job ID
-              tasksWorker.add(n);               //Worker
-              tasksWorkerStream.add(wis);       //Stream from worker to scheduler
-              tasksJobStream.add(dos);          //Stream from scheduler to job
-              
-            }
-
-        } 
+              jobIDQueue.add(jobId);
+              taskIDQueue.add(i);
+              classNameQueue.add(className);
+              jobStreamQueue.add(dos);
+           }
+        }else if (socket!=null){         //if socket open, close
+            socket.close();  
+        }
+ 
         
         //////////////////////////Handle Queue//////////////////////////////////////////
-        
+        for (int i =0; i<jobIDQueue.size(); i++){
+            //Pull out information about task
+            int jobQueue = jobIDQueue.get(i);
+            int taskQueue = taskIDQueue.get(i);
+            String classQueue = classNameQueue.get(i);
+            DataOutputStream streamQueue = jobStreamQueue.get(i);
+
+            //get a free worker
+            WorkerNode n = cluster.getFreeWorkerNode();
+            //Remove from queues since free worker found    
+            jobIDQueue.remove(i);
+            taskIDQueue.remove(i);
+            classNameQueue.remove(i);
+            jobStreamQueue.remove(i);
+  
+              
+            //notify the client
+            streamQueue.writeInt(Opcode.job_start);
+            streamQueue.flush();
+
+            //assign the tasks to the worker
+            Socket workerSocket = new Socket(n.addr, n.port);
+            DataInputStream wis = new DataInputStream(workerSocket.getInputStream());
+            DataOutputStream wos = new DataOutputStream(workerSocket.getOutputStream());
+            
+            //Provide data
+            wos.writeInt(Opcode.new_tasks);
+            wos.writeInt(jobQueue);
+            wos.writeUTF(classQueue);
+            wos.writeInt(taskQueue);
+            wos.writeInt(1);
+            wos.flush();
+                            
+            //Save data so can get data from worker later
+            tasksJob.add(jobQueue);              //Job ID
+            tasksWorker.add(n);               //Worker
+            tasksWorkerStream.add(wis);       //Stream from worker to scheduler
+            tasksJobStream.add(streamQueue);          //Stream from scheduler to job
+            
+        }
+
         
         //////////////////////////Handle Finished Job//////////////////////////////////////////
-        
         //See if any jobs are finished
         for (int i =0; i<tasksWorker.size(); i++){
             //Pull data about ongoing job
@@ -154,14 +179,14 @@ public class Scheduler {
             DataInputStream workerStream = tasksWorkerStream.get(i);
             DataOutputStream jobStream = tasksJobStream.get(i);
             
-          //Check if worker on task has anything to return
+            //Check if worker on task has anything to return
             if (workerStream.available()>0){
                 //Get information about task
-               while(workerStream.readInt() == Opcode.task_finish) {
-                jobStream.writeInt(Opcode.job_print);
-                jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+worker.id);
-                jobStream.flush();
-              }
+                while(workerStream.readInt() == Opcode.task_finish) {
+                    jobStream.writeInt(Opcode.job_print);
+                    jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+worker.id);
+                    jobStream.flush();
+                }
 
                 //Remove Job & worker since done
                 tasksJob.remove(i);
@@ -170,27 +195,24 @@ public class Scheduler {
                 tasksWorkerStream.remove(i);
                 tasksJobStream.remove(i);
 
-              // free the worker and free the stream
-              workerStream.close();
-              cluster.addFreeWorkerNode(worker);
+                // free the worker and free the stream
+                workerStream.close();
+                cluster.addFreeWorkerNode(worker);
 
-              //notify the client if last task in job
-              if (tasksJob.contains(jobID)==false){
-                jobStream.writeInt(Opcode.job_finish);
-                jobStream.close();
-              }
-              
-
-          }
-        }
-    }
+                //notify the client if last task in job
+                if (tasksJob.contains(jobID)==false){
+                    jobStream.writeInt(Opcode.job_finish);
+                    jobStream.close();
+                }
+            }
+          
+         }
+      }//keep repeating
+      
     } catch(Exception e) {
       e.printStackTrace();
     }
-      
-    //serverSocket.close();
-  }
-  
+}  
 
   //the data structure for a cluster of worker nodes
   class Cluster {
