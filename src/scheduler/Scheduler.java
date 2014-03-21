@@ -31,12 +31,14 @@ public class Scheduler {
     ArrayList<String> classNameQueue = new ArrayList<String>();             //class name in queue
     ArrayList<DataOutputStream> jobStreamQueue = new ArrayList<DataOutputStream>(); //output stream to job in queue
 
-
     //Data for running tasks
     ArrayList<Integer> tasksJob = new ArrayList<Integer>();             //Job ID
     ArrayList<WorkerNode> tasksWorker = new ArrayList<WorkerNode>();    //Worker for task
     ArrayList<DataInputStream> tasksWorkerStream = new ArrayList<DataInputStream>(); //Stream between worker and scheduler
     ArrayList<DataOutputStream> tasksJobStream = new ArrayList<DataOutputStream>(); //Stream between job and scheduler
+
+    //variable for indexing into different pools
+    int nextJob = 0;
 
     try{
       //create a ServerSocket listening at specified port - set timeout at 1000ms
@@ -86,7 +88,6 @@ public class Scheduler {
         }
 
         //////////////////////////Recieve Job//////////////////////////////////////////
-
         //a connection from client submitting a job
         if(code == Opcode.new_job){
           String className = dis.readUTF();
@@ -128,32 +129,32 @@ public class Scheduler {
  
         
         //////////////////////////Handle Queue//////////////////////////////////////////
-        for (int i =0; i<jobIDQueue.size(); i++){
+        while (cluster.checkFreeWorkerNode()==1 && taskIDQueue.size()>0){             //Check for free workers - if there are none, don't block
             //Pull out information about task
-            int jobQueue = jobIDQueue.get(i);
-            int taskQueue = taskIDQueue.get(i);
-            String classQueue = classNameQueue.get(i);
-            DataOutputStream streamQueue = jobStreamQueue.get(i);
-
+            int jobQueue = jobIDQueue.get(nextJob);
+            int taskQueue = taskIDQueue.get(nextJob);
+            String classQueue = classNameQueue.get(nextJob);
+            DataOutputStream streamQueue = jobStreamQueue.get(nextJob);
+            
             //get a free worker
             WorkerNode n = cluster.getFreeWorkerNode();
+            
             //Remove from queues since free worker found    
-            jobIDQueue.remove(i);
-            taskIDQueue.remove(i);
-            classNameQueue.remove(i);
-            jobStreamQueue.remove(i);
+            jobIDQueue.remove(nextJob);
+            taskIDQueue.remove(nextJob);
+            classNameQueue.remove(nextJob);
+            jobStreamQueue.remove(nextJob);
   
-              
-            //notify the client
+            //notify the client of job started
             streamQueue.writeInt(Opcode.job_start);
             streamQueue.flush();
 
-            //assign the tasks to the worker
+            //create connection with worker
             Socket workerSocket = new Socket(n.addr, n.port);
             DataInputStream wis = new DataInputStream(workerSocket.getInputStream());
             DataOutputStream wos = new DataOutputStream(workerSocket.getOutputStream());
             
-            //Provide data
+            //Provide data to worker
             wos.writeInt(Opcode.new_tasks);
             wos.writeInt(jobQueue);
             wos.writeUTF(classQueue);
@@ -167,6 +168,22 @@ public class Scheduler {
             tasksWorkerStream.add(wis);       //Stream from worker to scheduler
             tasksJobStream.add(streamQueue);          //Stream from scheduler to job
             
+            //Handle Scheduling
+            int foundNextFlag = 0;
+            //Search for job with a different job ID
+            for (int i = nextJob; i<jobIDQueue.size() ;i++){
+                if (jobIDQueue.get(i)==jobQueue){
+                    continue;
+                }else{
+                    nextJob = i;
+                    foundNextFlag = 1;
+                    break;
+                }
+            }
+            //If there were no jobs with a different id, go to beginning of list
+            if (foundNextFlag==0){
+                nextJob = 0;
+            }
         }
 
         
@@ -178,6 +195,8 @@ public class Scheduler {
             WorkerNode worker = tasksWorker.get(i);
             DataInputStream workerStream = tasksWorkerStream.get(i);
             DataOutputStream jobStream = tasksJobStream.get(i);
+            
+            //Choose who to schedule
             
             //Check if worker on task has anything to return
             if (workerStream.available()>0){
@@ -235,6 +254,16 @@ public class Scheduler {
 
       return n;
     }
+
+    int checkFreeWorkerNode() {
+        //if free note avaialble return 1
+        if (freeWorkers.size() > 0){
+            return 1;
+        }else{
+            return 0;
+        }
+    }
+
 
     WorkerNode getFreeWorkerNode() {
       WorkerNode n = null;
