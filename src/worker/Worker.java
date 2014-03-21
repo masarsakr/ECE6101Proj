@@ -77,9 +77,14 @@ public class Worker {
         //read the job file from shared file system
         Job job = JobFactory.getJob(fileName, className);
 
+        //Flag to hold whether job being worked on
+        int working = 0;
+
         //execute the assigned tasks
         for(int taskId=taskIdStart; taskId<taskIdStart+numTasks; taskId++){
+          working = 1;
           job.task(taskId);
+          working = 0;
           //report to scheduler once a task is finished
           dos.writeInt(Opcode.task_finish);
           dos.writeInt(taskId);
