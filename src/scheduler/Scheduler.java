@@ -72,9 +72,8 @@ public class Scheduler {
         if (dis!=null){    
             code = dis.readInt();
         }
-        
+        ////////////////////////////////////////////////////////////////////////////////        
         ///////////////////////////Recieve Worker/////////////////////////////////////////
-        
         //a connection from worker reporting itself
         if(code == Opcode.new_worker){
           //include the worker into the cluster
@@ -90,7 +89,7 @@ public class Scheduler {
           //flush Streams
           dos.flush();
         }
-
+        ////////////////////////////////////////////////////////////////////////////////
         //////////////////////////Recieve Job//////////////////////////////////////////
         //a connection from client submitting a job
         if(code == Opcode.new_job){
@@ -131,7 +130,7 @@ public class Scheduler {
             socket.close();  
         }
  
-        
+        ////////////////////////////////////////////////////////////////////////////////
         //////////////////////////Handle Queue//////////////////////////////////////////
         while (cluster.checkFreeWorkerNode()==1 && taskIDQueue.size()>0){             //Check for free workers - if there are none, don't block
             //Pull out information about task
@@ -152,6 +151,7 @@ public class Scheduler {
             DataInputStream wis;
             DataOutputStream wos;
 
+            //If connection fails due to worker dropping
             try{
                 //create connection with worker
                 workerSocket = new Socket(n.addr, n.port);
@@ -166,6 +166,7 @@ public class Scheduler {
                 wos.writeInt(1);
                 wos.flush();
             }catch(ConnectException ce){
+                //continue to next
                 continue;
             }
             
@@ -184,7 +185,8 @@ public class Scheduler {
             lastHeartbeatRunQueue.add(System.currentTimeMillis());                //add time of add
             classNameRunQueue.add(classQueue);                      //Class name
             
-            //Handle Scheduling
+            
+            ///////////////////////Handle Scheduling/////////////////////////////////////
             int foundNextFlag = 0;
             //Search for job with a different job ID
             for (int i = nextJob; i<jobIDQueue.size() ;i++){
@@ -200,9 +202,10 @@ public class Scheduler {
             if (foundNextFlag==0){
                 nextJob = 0;
             }
+            /////////////////////////////////////////////////////////////////////////////
         }
-
         
+        ////////////////////////////////////////////////////////////////////////////////
         //////////////////////////Handle Finished Job//////////////////////////////////////////
         //See if any jobs are finished
         for (int i =0; i<jobIDRunQueue.size(); i++){
@@ -212,6 +215,7 @@ public class Scheduler {
             DataInputStream workerStream = workerStreamRunQueue.get(i);
             DataOutputStream jobStream = jobStreamRunQueue.get(i);
             
+            //if worker fails, catch and conitnue
             try{
                                                                                                             
                 //Check if worker on task has anything to return
