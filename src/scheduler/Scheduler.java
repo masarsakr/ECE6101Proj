@@ -142,30 +142,39 @@ public class Scheduler {
             
             //get a free worker
             WorkerNode n = cluster.getFreeWorkerNode();
-            
-            //Remove from queues since free worker found    
-            jobIDQueue.remove(nextJob);
-            taskIDQueue.remove(nextJob);
-            classNameQueue.remove(nextJob);
-            jobStreamQueue.remove(nextJob);
   
             //notify the client of job started
             streamQueue.writeInt(Opcode.job_start);
             streamQueue.flush();
 
             //create connection with worker
-            Socket workerSocket = new Socket(n.addr, n.port);
-            DataInputStream wis = new DataInputStream(workerSocket.getInputStream());
-            DataOutputStream wos = new DataOutputStream(workerSocket.getOutputStream());
+            Socket workerSocket;
+            DataInputStream wis;
+            DataOutputStream wos;
+
+            try{
+                //create connection with worker
+                workerSocket = new Socket(n.addr, n.port);
+                wis = new DataInputStream(workerSocket.getInputStream());
+                wos = new DataOutputStream(workerSocket.getOutputStream());
+                
+                //Provide data to worker
+                wos.writeInt(Opcode.new_tasks);
+                wos.writeInt(jobQueue);
+                wos.writeUTF(classQueue);
+                wos.writeInt(taskQueue);
+                wos.writeInt(1);
+                wos.flush();
+            }catch(ConnectException ce){
+                continue;
+            }
             
-            //Provide data to worker
-            wos.writeInt(Opcode.new_tasks);
-            wos.writeInt(jobQueue);
-            wos.writeUTF(classQueue);
-            wos.writeInt(taskQueue);
-            wos.writeInt(1);
-            wos.flush();
-                            
+            //Remove from queues since free worker found    
+            jobIDQueue.remove(nextJob);
+            taskIDQueue.remove(nextJob);
+            classNameQueue.remove(nextJob);
+            jobStreamQueue.remove(nextJob);
+                
             //Save data so can get data from worker later
             jobIDRunQueue.add(jobQueue);              //Job ID
             taskIDRunQueue.add(taskQueue);              //Task ID
@@ -202,55 +211,83 @@ public class Scheduler {
             WorkerNode worker = workerRunQueue.get(i);
             DataInputStream workerStream = workerStreamRunQueue.get(i);
             DataOutputStream jobStream = jobStreamRunQueue.get(i);
-                                                            
-            //Check if worker on task has anything to return
-            if (workerStream.available()>0){
-                //Read value from worker
-                int valueRead = workerStream.readInt() ;
-                
-                //Look for heartbeat
-                if (valueRead == Opcode.worker_heartbeat){
-                    //If there are mutliple heartbeats in the stream, read them all
-                    while(valueRead ==  Opcode.worker_heartbeat) {
-                        valueRead = workerStream.readInt();
-                    }
-                    lastHeartbeatRunQueue.set(i, System.currentTimeMillis());
-                }
-                
-                //Check if job finished
-                if (valueRead == Opcode.task_finish){
-                    //Get information about task
-                    while(valueRead == Opcode.task_finish) {
-                        jobStream.writeInt(Opcode.job_print);
-                        jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+worker.id);
-                        jobStream.flush();
-                        valueRead = workerStream.readInt();
-                    }
-
-                    //Remove Job & worker since done
-                    jobIDRunQueue.remove(i);
-                    workerRunQueue.remove(i);
-                    //Remove connections
-                    workerStreamRunQueue.remove(i);
-                    jobStreamRunQueue.remove(i);
-
-                    // free the worker and free the stream
-                    workerStream.close();
-                    cluster.addFreeWorkerNode(worker);
-
-                    //notify the client if last task in job
-                    if (jobIDRunQueue.contains(jobID)==false && jobIDQueue.contains(jobID)==false){
-                        jobStream.writeInt(Opcode.job_finish);
-                        jobStream.close();
-                    }
-                }
-            }
             
-            //Check if hearbeat has been dead
-            if ((System.currentTimeMillis()-lastHeartbeatRunQueue.get(i))>5000){
+            try{
+                                                                                                            
+                //Check if worker on task has anything to return
+                if (workerStream.available()>0){
+                    //Read value from worker
+                    int valueRead = workerStream.readInt() ; //Fix
+                    
+                    //Look for heartbeat
+                    if (valueRead == Opcode.worker_heartbeat){
+                        //If there are mutliple heartbeats in the stream, read them all
+                        while(valueRead ==  Opcode.worker_heartbeat) {
+                            valueRead = workerStream.readInt();     //Fix
+                        }
+                        lastHeartbeatRunQueue.set(i, System.currentTimeMillis());
+                    }
+                    
+                    //Check if job finished
+                    if (valueRead == Opcode.task_finish){
+                        //Get information about task
+                        while(valueRead == Opcode.task_finish) {
+                            jobStream.writeInt(Opcode.job_print);
+                            jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+worker.id);
+                            jobStream.flush();
+                            valueRead = workerStream.readInt();     //Fix
+                        }
+
+                        //Remove Job & worker since done
+                        jobIDRunQueue.remove(i);
+                        workerRunQueue.remove(i);
+                        //Remove connections
+                        workerStreamRunQueue.remove(i);
+                        jobStreamRunQueue.remove(i);
+                        //Remove other variables
+                        taskIDRunQueue.remove(i);              
+                        lastHeartbeatRunQueue.remove(i);               
+                        classNameRunQueue.remove(i);                     
+
+                        // free the worker and free the stream
+                        workerStream.close();
+                        cluster.addFreeWorkerNode(worker);
+
+                        //notify the client if last task in job
+                        if (jobIDRunQueue.contains(jobID)==false && jobIDQueue.contains(jobID)==false){
+                            jobStream.writeInt(Opcode.job_finish);
+                            jobStream.close();
+                        }
+                    }
+                }
+                
+            }catch(EOFException eof){
                 //Close connection with worker
                 workerStream.close();
-                System.out.println("Worker dead");
+
+                //Add to wait queue
+                jobIDQueue.add(jobIDRunQueue.get(i));
+                taskIDQueue.add(taskIDRunQueue.get(i));
+                classNameQueue.add(classNameRunQueue.get(i));
+                jobStreamQueue.add(jobStreamRunQueue.get(i));
+
+                //Remove from run queue
+                jobIDRunQueue.remove(i);              //Job ID
+                taskIDRunQueue.remove(i);              //Task ID
+                workerRunQueue.remove(i);               //Worker
+                workerStreamRunQueue.remove(i);       //Stream from worker to scheduler
+                jobStreamRunQueue.remove(i);          //Stream from scheduler to job
+                lastHeartbeatRunQueue.remove(i);                //add time of add
+                classNameRunQueue.remove(i);                      //Class name
+                
+                continue;
+            }
+
+            
+            //Check if hearbeat has been dead
+            if (jobIDRunQueue.size()>i && (System.currentTimeMillis()-lastHeartbeatRunQueue.get(i))>5000){
+                //Close connection with worker
+                workerStream.close();
 
                 //Add to wait queue
                 jobIDQueue.add(jobIDRunQueue.get(i));

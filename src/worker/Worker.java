@@ -32,7 +32,11 @@ class WorkerHeartbeat implements Runnable {
                             schedulerConnection.writeInt(Opcode.worker_heartbeat);
                     }
             }
-             
+            
+            //Send heartbeat
+            prevTime = System.currentTimeMillis();
+            schedulerConnection.writeInt(Opcode.worker_heartbeat);
+
             //report to scheduler once a task is finished
             schedulerConnection.writeInt(Opcode.task_finish);
             schedulerConnection.writeInt(taskId);
