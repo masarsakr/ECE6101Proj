@@ -10,6 +10,7 @@ public class Opcode {
   public static final int new_tasks = 30;
 
   public static final int worker_finish = 11;
+  public static final int worker_heartbeat = 12;
 
   public static final int job_start = 21;
   public static final int job_finish = 22;

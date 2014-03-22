@@ -4,6 +4,7 @@ import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
 import java.util.LinkedList;
+import java.util.Date;
 
 import common.*;
 
@@ -33,9 +34,12 @@ public class Scheduler {
 
     //Data for running tasks
     ArrayList<Integer> jobIDRunQueue = new ArrayList<Integer>();             //Job ID
+    ArrayList<Integer> taskIDRunQueue = new ArrayList<Integer>();             //Job ID
     ArrayList<WorkerNode> workerRunQueue = new ArrayList<WorkerNode>();    //Worker for task
     ArrayList<DataInputStream> workerStreamRunQueue = new ArrayList<DataInputStream>(); //Stream between worker and scheduler
     ArrayList<DataOutputStream> jobStreamRunQueue = new ArrayList<DataOutputStream>(); //Stream between job and scheduler
+    ArrayList<String> classNameRunQueue = new ArrayList<String>();             //class name in queue
+    ArrayList<Long> lastHeartbeatRunQueue = new ArrayList<Long>(); //Stream between job and scheduler
 
     //variable for indexing into different pools
     int nextJob = 0;
@@ -164,9 +168,12 @@ public class Scheduler {
                             
             //Save data so can get data from worker later
             jobIDRunQueue.add(jobQueue);              //Job ID
+            taskIDRunQueue.add(taskQueue);              //Task ID
             workerRunQueue.add(n);               //Worker
-            workerStreamRunQueue .add(wis);       //Stream from worker to scheduler
+            workerStreamRunQueue.add(wis);       //Stream from worker to scheduler
             jobStreamRunQueue.add(streamQueue);          //Stream from scheduler to job
+            lastHeartbeatRunQueue.add(System.currentTimeMillis());                //add time of add
+            classNameRunQueue.add(classQueue);                      //Class name
             
             //Handle Scheduling
             int foundNextFlag = 0;
@@ -195,35 +202,64 @@ public class Scheduler {
             WorkerNode worker = workerRunQueue.get(i);
             DataInputStream workerStream = workerStreamRunQueue.get(i);
             DataOutputStream jobStream = jobStreamRunQueue.get(i);
-            
-            //Choose who to schedule
-            
+                                                            
             //Check if worker on task has anything to return
             if (workerStream.available()>0){
-                //Get information about task
-                while(workerStream.readInt() == Opcode.task_finish) {
-                    jobStream.writeInt(Opcode.job_print);
-                    jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+worker.id);
-                    jobStream.flush();
+                //Read value from worker
+                int valueRead = workerStream.readInt() ;
+                
+                //Look for heartbeat
+                if (valueRead == Opcode.worker_heartbeat){
+                    lastHeartbeatRunQueue.set(i, System.currentTimeMillis());
                 }
+                
+                //Check if job finished
+                if (valueRead == Opcode.task_finish){
+                    //Get information about task
+                    while(valueRead == Opcode.task_finish) {
+                        jobStream.writeInt(Opcode.job_print);
+                        jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+worker.id);
+                        jobStream.flush();
+                        valueRead = workerStream.readInt();
+                    }
 
-                //Remove Job & worker since done
-                jobIDRunQueue.remove(i);
-                workerRunQueue.remove(i);
-                //Remove connections
-                workerStreamRunQueue.remove(i);
-                jobStreamRunQueue.remove(i);
+                    //Remove Job & worker since done
+                    jobIDRunQueue.remove(i);
+                    workerRunQueue.remove(i);
+                    //Remove connections
+                    workerStreamRunQueue.remove(i);
+                    jobStreamRunQueue.remove(i);
 
-                // free the worker and free the stream
-                workerStream.close();
-                cluster.addFreeWorkerNode(worker);
+                    // free the worker and free the stream
+                    workerStream.close();
+                    cluster.addFreeWorkerNode(worker);
 
-                //notify the client if last task in job
-                if (jobIDRunQueue.contains(jobID)==false && jobIDQueue.contains(jobID)==false){
-                    jobStream.writeInt(Opcode.job_finish);
-                    jobStream.close();
+                    //notify the client if last task in job
+                    if (jobIDRunQueue.contains(jobID)==false && jobIDQueue.contains(jobID)==false){
+                        jobStream.writeInt(Opcode.job_finish);
+                        jobStream.close();
+                    }
                 }
             }
+            
+            //Check if hearbeat has been dead
+            if ((System.currentTimeMillis()-lastHeartbeatRunQueue.get(i))>15000){
+                //Add to wait queue
+                jobIDQueue.add(jobIDRunQueue.get(i));
+                taskIDQueue.add(taskIDRunQueue.get(i));
+                classNameQueue.add(classNameRunQueue.get(i));
+                jobStreamQueue.add(jobStreamRunQueue.get(i));
+
+                //Remove from run queue
+                jobIDRunQueue.remove(i);              //Job ID
+                taskIDRunQueue.remove(i);              //Task ID
+                workerRunQueue.remove(i);               //Worker
+                workerStreamRunQueue.remove(i);       //Stream from worker to scheduler
+                jobStreamRunQueue.remove(i);          //Stream from scheduler to job
+                lastHeartbeatRunQueue.remove(i);                //add time of add
+                classNameRunQueue.remove(i);                      //Class name
+            }
+            
           
          }
       }//keep repeating
