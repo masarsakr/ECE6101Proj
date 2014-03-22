@@ -5,6 +5,51 @@ import java.net.*;
 
 import common.*;
 
+class WorkerHeartbeat implements Runnable {
+    int taskId;
+    DataOutputStream schedulerConnection;
+    
+    WorkerHeartbeat(int taskId, DataOutputStream schedulerConnection){
+        this.taskId = taskId;
+        this.schedulerConnection = schedulerConnection;         //connection to scheduler
+    }
+    
+    public void run() {
+
+        try{
+        
+            //Initial time entered
+            long prevTime = System.currentTimeMillis();
+            schedulerConnection.writeInt(Opcode.worker_heartbeat);
+
+            //While still processing
+            while(!Thread.currentThread().isInterrupted()){
+
+                    //If its been a second since last heartbeat
+                    if ((System.currentTimeMillis()-prevTime)>1000){
+                            //Send new heartbeat
+                            prevTime = System.currentTimeMillis();
+                            schedulerConnection.writeInt(Opcode.worker_heartbeat);
+                    }
+            }
+             
+            //report to scheduler once a task is finished
+            schedulerConnection.writeInt(Opcode.task_finish);
+            schedulerConnection.writeInt(taskId);
+            schedulerConnection.flush();
+        
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+
+    }
+    
+    public void terminate(){
+        
+    }
+
+
+}
 public class Worker {
 
   String schedulerAddr;
@@ -81,14 +126,17 @@ public class Worker {
         int working = 0;
 
         //execute the assigned tasks
-        for(int taskId=taskIdStart; taskId<taskIdStart+numTasks; taskId++){
-          working = 1;
+        for(int taskId=taskIdStart; taskId<taskIdStart+numTasks; taskId++){          
+          //Thread to send heartbeat
+          Thread t1 = new Thread(new WorkerHeartbeat(taskId, dos));
+          t1.start();
+          
+          //Perform task
           job.task(taskId);
-          working = 0;
-          //report to scheduler once a task is finished
-          dos.writeInt(Opcode.task_finish);
-          dos.writeInt(taskId);
-          dos.flush();
+          
+          //Tell hearbeat thread done and end
+          t1.interrupt();
+          t1.join();
         }
 
         //disconnect

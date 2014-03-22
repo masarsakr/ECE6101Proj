@@ -210,6 +210,10 @@ public class Scheduler {
                 
                 //Look for heartbeat
                 if (valueRead == Opcode.worker_heartbeat){
+                    //If there are mutliple heartbeats in the stream, read them all
+                    while(valueRead ==  Opcode.worker_heartbeat) {
+                        valueRead = workerStream.readInt();
+                    }
                     lastHeartbeatRunQueue.set(i, System.currentTimeMillis());
                 }
                 
@@ -243,7 +247,11 @@ public class Scheduler {
             }
             
             //Check if hearbeat has been dead
-            if ((System.currentTimeMillis()-lastHeartbeatRunQueue.get(i))>15000){
+            if ((System.currentTimeMillis()-lastHeartbeatRunQueue.get(i))>5000){
+                //Close connection with worker
+                workerStream.close();
+                System.out.println("Worker dead");
+
                 //Add to wait queue
                 jobIDQueue.add(jobIDRunQueue.get(i));
                 taskIDQueue.add(taskIDRunQueue.get(i));
