@@ -10,44 +10,6 @@ import common.*;
 
 public class Scheduler {
     
-    //Node for tasks that are running
-    class RunningTaskNode{
-        public int jobIDRunQueue;                  //Job ID
-        public int taskIDRunQueue;                 //Task ID
-        public WorkerNode workerRunQueue;          //Worker for task
-        public DataInputStream workerStreamRunQueue; //Stream between worker and scheduler
-        public DataOutputStream jobStreamRunQueue; //Stream between job and scheduler
-        public String classNameRunQueue;           //class name in queue
-        public long lastHeartbeatRunQueue;         //Stream between job and scheduler
-        
-        RunningTaskNode(int jobIDRunQueue, int taskIDRunQueue, WorkerNode workerRunQueue, DataInputStream workerStreamRunQueue, DataOutputStream jobStreamRunQueue, String classNameRunQueue, long lastHeartbeatRunQueue){
-            this.jobIDRunQueue = jobIDRunQueue;
-            this.taskIDRunQueue = taskIDRunQueue;
-            this.workerRunQueue = workerRunQueue;          
-            this.workerStreamRunQueue = workerStreamRunQueue; 
-            this.jobStreamRunQueue = jobStreamRunQueue; 
-            this.classNameRunQueue = classNameRunQueue;           
-            this.lastHeartbeatRunQueue = lastHeartbeatRunQueue;      
-
-        }
-    }
-    
-    //Node for tasks waiting to run
-    class QueueTaskNode{
-        public int jobIDQueue;           //job in queue
-        public int taskIDQueue;          //task in queue
-        public String classNameQueue;             //class name in queue
-        public DataOutputStream jobStreamQueue; //output stream to job in queue
-        
-        QueueTaskNode(int jobIDQueue, int taskIDQueue, String classNameQueue, DataOutputStream jobStreamQueue){
-            this.jobIDQueue = jobIDQueue;
-            this.taskIDQueue = taskIDQueue;
-            this.classNameQueue = classNameQueue;
-            this.jobStreamQueue = jobStreamQueue; 
-
-        }
-    }
-
   int schedulerPort;
   Cluster cluster;
   int jobIdNext;
@@ -66,11 +28,10 @@ public class Scheduler {
   public void run() {
     //Data for queue
     ArrayList<QueueTaskNode> queueTask = new ArrayList<QueueTaskNode>();
-
     //Data for running tasks
     ArrayList<RunningTaskNode> runningTask = new ArrayList<RunningTaskNode>();
 
-        //variable for indexing into different pools
+    //variable for indexing into different pools
     int nextJob = 0;
 
     try{
@@ -148,7 +109,7 @@ public class Scheduler {
           //get the tasks
           int numTasks = JobFactory.getJob(fileName, className).getNumTasks();
           
-          //Add tasks to queues
+          //Add tasks to wait queues
           for (int i = 0; i< numTasks;i++){
               QueueTaskNode newTask =  new QueueTaskNode(jobId, i, className, dos);
               queueTask.add(newTask);
@@ -162,24 +123,24 @@ public class Scheduler {
         //////////////////////////Handle Queue//////////////////////////////////////////
         while (cluster.checkFreeWorkerNode()==1 && queueTask.size()>0){             //Check for free workers - if there are none, don't block
             //Pull out information about task
-            int jobQueue = queueTask.get(nextJob).jobIDQueue;
-            int taskQueue = queueTask.get(nextJob).taskIDQueue;
-            String classQueue = queueTask.get(nextJob).classNameQueue;
-            DataOutputStream streamQueue = queueTask.get(nextJob).jobStreamQueue;
+            int jobID = queueTask.get(nextJob).jobID;
+            int taskID = queueTask.get(nextJob).taskID;
+            String className = queueTask.get(nextJob).className;
+            DataOutputStream jobStream = queueTask.get(nextJob).jobStream;
             
             //get a free worker
             WorkerNode n = cluster.getFreeWorkerNode();
   
             //notify the client of job started
-            streamQueue.writeInt(Opcode.job_start);
-            streamQueue.flush();
+            jobStream.writeInt(Opcode.job_start);
+            jobStream.flush();
 
             //create connection with worker
             Socket workerSocket;
             DataInputStream wis;
             DataOutputStream wos;
 
-            //If connection fails due to worker dropping
+            
             try{
                 //create connection with worker
                 workerSocket = new Socket(n.addr, n.port);
@@ -188,28 +149,28 @@ public class Scheduler {
                 
                 //Provide data to worker
                 wos.writeInt(Opcode.new_tasks);
-                wos.writeInt(jobQueue);
-                wos.writeUTF(classQueue);
-                wos.writeInt(taskQueue);
+                wos.writeInt(jobID);
+                wos.writeUTF(className);
+                wos.writeInt(taskID);
                 wos.writeInt(1);
                 wos.flush();
-            }catch(ConnectException ce){
+            }catch(ConnectException ce){ //If connection fails due to worker dropping
                 //continue to next
                 continue;
             }
             
-            //Remove from queues since free worker found    
+            //Remove from wait queues since free worker found    
             queueTask.remove(nextJob);
                 
-            //Save data so can get data from worker later
-            RunningTaskNode newTask = new RunningTaskNode(jobQueue, taskQueue, n, wis, streamQueue, classQueue, System.currentTimeMillis());
+            //Add to runnning queue
+            RunningTaskNode newTask = new RunningTaskNode(jobID, taskID, n, className, wis, jobStream, System.currentTimeMillis());
             runningTask.add(newTask);
             
             ///////////////////////Handle Scheduling/////////////////////////////////////
             int foundNextFlag = 0;
             //Search for job with a different job ID
             for (int i = nextJob; i<queueTask.size() ;i++){
-                if (queueTask.get(i).jobIDQueue==jobQueue){
+                if (queueTask.get(i).jobID==jobID){
                     continue;
                 }else{
                     nextJob = i;
@@ -229,10 +190,10 @@ public class Scheduler {
         //See if any jobs are finished
         for (int i =0; i<runningTask.size(); i++){
             //Pull data about ongoing job
-            int jobID = runningTask.get(i).jobIDRunQueue;
-            WorkerNode worker = runningTask.get(i).workerRunQueue;
-            DataInputStream workerStream = runningTask.get(i).workerStreamRunQueue;
-            DataOutputStream jobStream = runningTask.get(i).jobStreamRunQueue;
+            int jobID = runningTask.get(i).jobID;
+            WorkerNode workerID = runningTask.get(i).workerID;
+            DataInputStream workerStream = runningTask.get(i).workerStream;
+            DataOutputStream jobStream = runningTask.get(i).jobStream;
             
             //if worker fails, catch and conitnue
             try{
@@ -249,7 +210,7 @@ public class Scheduler {
                             valueRead = workerStream.readInt();     //Fix
                         }
                         RunningTaskNode modifiedTaskNode = runningTask.get(i);
-                        modifiedTaskNode.lastHeartbeatRunQueue = System.currentTimeMillis();
+                        modifiedTaskNode.lastHeartbeat = System.currentTimeMillis();
                         runningTask.set(i, modifiedTaskNode);
                     }
                     
@@ -258,33 +219,33 @@ public class Scheduler {
                         //Get information about task
                         while(valueRead == Opcode.task_finish) {
                             jobStream.writeInt(Opcode.job_print);
-                            jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+worker.id);
+                            jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+workerID.id);
                             jobStream.flush();
                             valueRead = workerStream.readInt();     //Fix
                         }
 
-                        //Remove Job & worker since done
+                        //Remove task from running task queue since done
                         runningTask.remove(i);
 
                         // free the worker and free the stream
                         workerStream.close();
-                        cluster.addFreeWorkerNode(worker);
+                        cluster.addFreeWorkerNode(workerID);
 
-                        //Check if anything left for job
+                        //Check if anything left for job in the running tasks and queue
                         int doneFlag = 1;
                         for (int j = 0; j<runningTask.size() ;j++){
-                            if (runningTask.get(j).jobIDRunQueue==jobID){
+                            if (runningTask.get(j).jobID==jobID){
                                 doneFlag = 0; 
                                 break; 
                             }
                         }
                         for (int j = 0; j<queueTask.size() && doneFlag==1 ;j++){
-                            if (queueTask.get(j).jobIDQueue==jobID){
+                            if (queueTask.get(j).jobID==jobID){
                                 doneFlag = 0; 
                                 break; 
                             }
                         }
-                        //If not queue has the jobID, then it is finished
+                        //If no queue has the jobID, then job is finished
                         if (doneFlag==1){
                             jobStream.writeInt(Opcode.job_finish);
                             jobStream.close();
@@ -292,15 +253,15 @@ public class Scheduler {
                     }
                 }
                 
-            }catch(EOFException eof){
+            }catch(EOFException eof){           //connection with worker dropped
                 //Close connection with worker
                 workerStream.close();
 
-                //Add to wait queue
-                QueueTaskNode newTask = new QueueTaskNode(runningTask.get(i).jobIDRunQueue, runningTask.get(i).taskIDRunQueue, runningTask.get(i).classNameRunQueue, runningTask.get(i).jobStreamRunQueue);
+                //Add task wait queue
+                QueueTaskNode newTask = new QueueTaskNode(runningTask.get(i).jobID, runningTask.get(i).taskID, runningTask.get(i).className, runningTask.get(i).jobStream);
                 queueTask.add(newTask);
 
-                //Remove from run queue
+                //Remove task from run queue
                 runningTask.remove(i); 
                 
                 continue;
@@ -308,26 +269,64 @@ public class Scheduler {
 
             
             //Check if hearbeat has been dead
-            if (runningTask.size()>i && (System.currentTimeMillis()-runningTask.get(i).lastHeartbeatRunQueue)>5000){
+            if (runningTask.size()>i && (System.currentTimeMillis()-runningTask.get(i).lastHeartbeat)>5000){
                 //Close connection with worker
                 workerStream.close();
 
                 //Add to wait queue
-                QueueTaskNode newTask = new QueueTaskNode(runningTask.get(i).jobIDRunQueue, runningTask.get(i).taskIDRunQueue, runningTask.get(i).classNameRunQueue, runningTask.get(i).jobStreamRunQueue);
+                QueueTaskNode newTask = new QueueTaskNode(runningTask.get(i).jobID, runningTask.get(i).taskID, runningTask.get(i).className, runningTask.get(i).jobStream);
                 queueTask.add(newTask);
 
                 //Remove from run queue
                 runningTask.remove(i); 
             }
-            
-          
-         }
-      }//keep repeating
-      
-    } catch(Exception e) {
-      e.printStackTrace();
+         }//for loop
+         
+       }//while infinite loop
+        
+      } catch(Exception e) {
+        e.printStackTrace();
+      }
+    }  
+
+    //Node for tasks that are running
+    class RunningTaskNode{
+        public int jobID;                  //Job ID
+        public int taskID;                 //Task ID
+        public WorkerNode workerID;          //Worker for task
+        public String className;           //class name in queue
+        public DataInputStream workerStream; //Stream between worker and scheduler
+        public DataOutputStream jobStream; //Stream between job and scheduler
+        public long lastHeartbeat;         //Stream between job and scheduler
+        
+        RunningTaskNode(int jobID, int taskID, WorkerNode workerID, String className, DataInputStream workerStream, DataOutputStream jobStream, long lastHeartbeat){
+            this.jobID = jobID;
+            this.taskID = taskID;
+            this.workerID = workerID; 
+            this.className = className;           
+            this.workerStream = workerStream; 
+            this.jobStream = jobStream; 
+            this.lastHeartbeat = lastHeartbeat;      
+
+        }
     }
-}  
+    
+    //Node for tasks waiting to run
+    class QueueTaskNode{
+        public int jobID;           //job in queue
+        public int taskID;          //task in queue
+        public String className;             //class name in queue
+        public DataOutputStream jobStream; //output stream to job in queue
+        
+        QueueTaskNode(int jobID, int taskID, String className, DataOutputStream jobStream){
+            this.jobID = jobID;
+            this.taskID = taskID;
+            this.className = className;
+            this.jobStream = jobStream; 
+
+        }
+    }
+
 
   //the data structure for a cluster of worker nodes
   class Cluster {
@@ -402,6 +401,5 @@ public class Scheduler {
       status = 0;
     }
   }
-
 
 }
