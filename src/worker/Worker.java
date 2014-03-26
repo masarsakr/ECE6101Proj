@@ -21,6 +21,7 @@ class WorkerHeartbeat implements Runnable {
             //Initial time entered
             long prevTime = System.currentTimeMillis();
             schedulerConnection.writeInt(Opcode.worker_heartbeat);
+            schedulerConnection.flush();
 
             //While still processing
             while(!Thread.currentThread().isInterrupted()){
@@ -30,6 +31,7 @@ class WorkerHeartbeat implements Runnable {
                             //Send new heartbeat
                             prevTime = System.currentTimeMillis();
                             schedulerConnection.writeInt(Opcode.worker_heartbeat);
+                            schedulerConnection.flush();
                     }
             }
             
