@@ -195,19 +195,21 @@ public class Scheduler {
             DataInputStream workerStream = runningTask.get(i).workerStream;
             DataOutputStream jobStream = runningTask.get(i).jobStream;
             
+            RunningTaskNode currentNode = runningTask.get(i); 
+            
             //if worker fails, catch and conitnue
             try{
                                                                                                             
                 //Check if worker on task has anything to return
                 if (workerStream.available()>0){
                     //Read value from worker
-                    int valueRead = workerStream.readInt() ; //Fix
+                    int valueRead = workerStream.readInt() ; 
                     
                     //Look for heartbeat
                     if (valueRead == Opcode.worker_heartbeat){
                         //If there are mutliple heartbeats in the stream, read them all
                         while(valueRead ==  Opcode.worker_heartbeat) {
-                            valueRead = workerStream.readInt();     //Fix
+                            valueRead = workerStream.readInt(); 
                         }
                         RunningTaskNode modifiedTaskNode = runningTask.get(i);
                         modifiedTaskNode.lastHeartbeat = System.currentTimeMillis();
@@ -221,7 +223,7 @@ public class Scheduler {
                             jobStream.writeInt(Opcode.job_print);
                             jobStream.writeUTF("task "+workerStream.readInt()+" finished on worker "+workerID.id);
                             jobStream.flush();
-                            valueRead = workerStream.readInt();     //Fix
+                            valueRead = workerStream.readInt();
                         }
 
                         //Remove task from running task queue since done
@@ -269,16 +271,16 @@ public class Scheduler {
 
             
             //Check if hearbeat has been dead
-            if (runningTask.size()>i && (System.currentTimeMillis()-runningTask.get(i).lastHeartbeat)>5000){
+            if (runningTask.contains(currentNode)==true && (System.currentTimeMillis()-currentNode.lastHeartbeat)>5000){
                 //Close connection with worker
                 workerStream.close();
 
                 //Add to wait queue
-                QueueTaskNode newTask = new QueueTaskNode(runningTask.get(i).jobID, runningTask.get(i).taskID, runningTask.get(i).className, runningTask.get(i).jobStream);
+                QueueTaskNode newTask = new QueueTaskNode(currentNode.jobID, currentNode.taskID, currentNode.className, currentNode.jobStream);
                 queueTask.add(newTask);
 
                 //Remove from run queue
-                runningTask.remove(i); 
+                runningTask.remove(currentNode); 
             }
          }//for loop
          
