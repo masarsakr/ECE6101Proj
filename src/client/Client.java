@@ -28,6 +28,8 @@ public class Client {
     dos.writeLong(file.length());
     dos.flush();
 
+    time1 = System.nanoTime()/1000000;
+
     //get jobId from scheduler
     int jobId = dis.readInt();
 

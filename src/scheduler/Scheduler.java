@@ -132,8 +132,10 @@ public class Scheduler {
             WorkerNode n = cluster.getFreeWorkerNode();
   
             //notify the client of job started
-            jobStream.writeInt(Opcode.job_start);
-            jobStream.flush();
+            if (taskID==0){
+                jobStream.writeInt(Opcode.job_start);
+                jobStream.flush();
+            }
 
             //create connection with worker
             Socket workerSocket;
