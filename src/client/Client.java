@@ -42,7 +42,7 @@ public class Client {
     }
     fis.close();
     dos.flush();
-    time1 = System.nanoTime()/1000000;
+   
     System.out.println("job submitted");
 
     //repeatedly process scheduler's feedback
