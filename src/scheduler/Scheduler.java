@@ -131,12 +131,6 @@ public class Scheduler {
             //get a free worker
             WorkerNode n = cluster.getFreeWorkerNode();
   
-            //notify the client of job started
-            if (taskID==0){
-                jobStream.writeInt(Opcode.job_start);
-                jobStream.flush();
-            }
-
             //create connection with worker
             Socket workerSocket;
             DataInputStream wis;
@@ -149,6 +143,12 @@ public class Scheduler {
                 wis = new DataInputStream(workerSocket.getInputStream());
                 wos = new DataOutputStream(workerSocket.getOutputStream());
                 
+				//notify the client of job started
+				if (taskID==0){
+					jobStream.writeInt(Opcode.job_start);
+					jobStream.flush();
+				}
+				
                 //Provide data to worker
                 wos.writeInt(Opcode.new_tasks);
                 wos.writeInt(jobID);
