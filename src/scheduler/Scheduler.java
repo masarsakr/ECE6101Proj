@@ -37,7 +37,7 @@ public class Scheduler {
     try{
       //create a ServerSocket listening at specified port - set timeout at 1000ms
       ServerSocket serverSocket = new ServerSocket(schedulerPort);
-      serverSocket.setSoTimeout(1000);
+      serverSocket.setSoTimeout(5);
 
       while(true){                                                      //accept connection from worker or client
         //Hold connection info
